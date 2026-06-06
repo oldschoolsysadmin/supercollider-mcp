@@ -63,6 +63,14 @@ import {
   ControlPatternSchema,
   ListActivePatternsSchema,
 } from "./tools/patternTools.js";
+import {
+  searchScHelpHandler,
+  getScHelpHandler,
+  getClassInterfaceHandler,
+  SearchScHelpSchema,
+  GetScHelpSchema,
+  GetClassInterfaceSchema,
+} from "./tools/helpTools.js";
 import { logger } from "./utils/logger.js";
 
 /**
@@ -518,6 +526,65 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: "search_sc_help",
+        description:
+          "Search SuperCollider help docs by keyword. Returns matching class names, " +
+          "summaries, and categories. Does not require sclang to be running. " +
+          "Use this to discover the right class name before calling get_sc_help.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Keyword to search for (e.g. 'reverb', 'LFNoise', 'Pbind')",
+            },
+            category: {
+              type: "string",
+              description: "Optional category filter (e.g. 'UGens', 'Patterns', 'Filters')",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum results to return (default: 20, max: 50)",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "get_sc_help",
+        description:
+          "Get full help documentation for a SuperCollider class or UGen. " +
+          "Returns description, all methods with argument names and descriptions, " +
+          "and a code example. Does not require sclang to be running.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            className: {
+              type: "string",
+              description: "Exact class name (case-sensitive, e.g. 'SinOsc', 'Pbind', 'Reverb')",
+            },
+          },
+          required: ["className"],
+        },
+      },
+      {
+        name: "get_class_interface",
+        description:
+          "List all methods and argument names for a class via live sclang introspection. " +
+          "More authoritative than get_sc_help for quark-provided classes. " +
+          "Requires sclang to be connected.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            className: {
+              type: "string",
+              description: "Class name to introspect (e.g. 'SinOsc', 'Ndef')",
+            },
+          },
+          required: ["className"],
+        },
+      },
     ],
   };
 });
@@ -657,6 +724,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "list_active_patterns": {
       const parsedArgs = ListActivePatternsSchema.parse(args);
       return await listActivePatternsHandler(sclangClient, parsedArgs);
+    }
+
+    case "search_sc_help": {
+      const parsedArgs = SearchScHelpSchema.parse(args);
+      return await searchScHelpHandler(parsedArgs);
+    }
+
+    case "get_sc_help": {
+      const parsedArgs = GetScHelpSchema.parse(args);
+      return await getScHelpHandler(parsedArgs);
+    }
+
+    case "get_class_interface": {
+      const parsedArgs = GetClassInterfaceSchema.parse(args);
+      return await getClassInterfaceHandler(sclangClient, parsedArgs);
     }
 
     default:
