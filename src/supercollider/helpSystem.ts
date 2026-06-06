@@ -50,11 +50,61 @@ export interface HelpArgument {
 }
 
 /**
+ * Extract the value of a top-level scalar key from a ~/.supercollider.yaml file.
+ * Handles both quoted and unquoted values. Returns null if the file is missing
+ * or the key is not present. We avoid a full YAML parser dependency because
+ * supercollider.yaml uses a predictable flat format.
+ */
+function readYamlKey(key: string): string | null {
+  const yamlPath = path.join(os.homedir(), ".supercollider.yaml");
+  if (!fs.existsSync(yamlPath)) return null;
+
+  try {
+    const content = fs.readFileSync(yamlPath, "utf-8");
+    const match = content.match(new RegExp(`^${key}:\\s*["']?(.+?)["']?\\s*$`, "m"));
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Given the sclang executable path from .supercollider.yaml, derive the
+ * HelpSource directory. Layout differs by platform:
+ *
+ *   Windows: sclang.exe sits in the SC install root alongside HelpSource/
+ *            e.g. C:/Program Files/SuperCollider-3.14.1/sclang.exe
+ *                 → C:/Program Files/SuperCollider-3.14.1/HelpSource
+ *
+ *   macOS:   sclang sits in Contents/MacOS/ inside the .app bundle,
+ *            HelpSource is in Contents/Resources/ (one level up, then across)
+ *            e.g. /Applications/SuperCollider.app/Contents/MacOS/sclang
+ *                 → /Applications/SuperCollider.app/Contents/Resources/HelpSource
+ *
+ *   Linux:   sclang is typically in /usr/bin/, which is unrelated to the
+ *            HelpSource location at /usr/share/SuperCollider/HelpSource.
+ *            Derivation is not reliable — returns null to signal fallback.
+ */
+function deriveHelpDirFromSclang(sclangPath: string): string | null {
+  switch (os.platform()) {
+    case "win32":
+      return path.join(path.dirname(sclangPath), "HelpSource");
+    case "darwin":
+      // MacOS/ → up to Contents/ → Resources/HelpSource
+      return path.join(path.dirname(sclangPath), "..", "Resources", "HelpSource");
+    default:
+      return null;
+  }
+}
+
+/**
  * Resolve the SC HelpSource directory.
  *
  * Priority:
- *   1. SC_HELP_DIR environment variable
- *   2. Per-platform default installation path
+ *   1. SC_HELP_DIR environment variable (explicit override)
+ *   2. Derived from the sclang path in ~/.supercollider.yaml
+ *      (works on Windows and macOS; not reliable on Linux)
+ *   3. Per-platform default installation path (unversioned, may not exist)
  *
  * The HelpSource directory contains the raw .schelp source files,
  * not the rendered HTML. SC installs it alongside the application.
@@ -62,6 +112,12 @@ export interface HelpArgument {
 export function resolveHelpDir(): string {
   if (process.env.SC_HELP_DIR) {
     return process.env.SC_HELP_DIR;
+  }
+
+  const sclangPath = readYamlKey("sclang");
+  if (sclangPath) {
+    const derived = deriveHelpDirFromSclang(sclangPath);
+    if (derived) return derived;
   }
 
   switch (os.platform()) {

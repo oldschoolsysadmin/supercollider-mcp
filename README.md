@@ -33,18 +33,13 @@ Add to your Claude Code MCP configuration (`~/.config/claude/mcp.json` or simila
   "mcpServers": {
     "supercollider": {
       "command": "node",
-      "args": ["/path/to/supercollider-mcp/dist/index.js"],
-      "env": {
-        "SCLANG_PATH": "/path/to/sclang",
-        "SCSYNTH_PATH": "/path/to/scsynth",
-        "SC_HELP_DIR": "/path/to/SuperCollider/HelpSource"
-      }
+      "args": ["/path/to/supercollider-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-`SC_HELP_DIR` points to the `HelpSource/` directory inside your SuperCollider installation — needed for the `search_sc_help` and `get_sc_help` tools. SuperCollider often installs into a version-numbered directory (e.g. `SuperCollider-3.13.0`), so the auto-detected default may not match; set this explicitly if help queries return no results. See [SC_HELP_DIR](#sc_help_dir) below for platform examples.
+**Binary paths and help directory do not go in the MCP config.** Configure them in `~/.supercollider.yaml` instead — see [Configuration](#configuration) below. The `env` block in MCP JSON is not reliably passed through on all platforms.
 
 ### Programmatic Usage
 
@@ -651,31 +646,25 @@ If you prefer environment variables or need to override `.supercollider.yaml` se
   - **Example**: `/usr/local/bin/scsynth` or `/opt/supercollider-3.13/bin/scsynth`
 
 - **`SC_HELP_DIR`**: <a name="sc_help_dir"></a>Path to the `HelpSource/` directory inside your SC installation
-  - **Default**: Platform-specific standard location (see below)
-  - **When to set**: SC is installed in a version-numbered directory (very common), or to a non-standard path
-  - **Used by**: `search_sc_help` and `get_sc_help` tools — these read `.schelp` source files directly
+  - **Default**: Derived automatically from the `sclang` path in `~/.supercollider.yaml` on Windows and macOS (recommended). Falls back to a platform-specific unversioned path if no YAML config is found.
+  - **When to set**: Linux (where sclang and HelpSource live in unrelated directories so auto-derivation is not possible), or any platform where `~/.supercollider.yaml` is not configured.
+  - **Used by**: `search_sc_help` and `get_sc_help` tools — these read `.schelp` source files directly.
 
-  SuperCollider frequently installs into versioned directories. If help queries return no results, check the actual path and set `SC_HELP_DIR` accordingly:
+  On **Windows and macOS**, once `~/.supercollider.yaml` has the correct `sclang` path, `SC_HELP_DIR` is not needed — the help directory is derived automatically. On **Linux**, set it explicitly:
 
-  | Platform | Common versioned path |
-  |----------|-----------------------|
-  | macOS    | `/Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource` |
-  | Linux    | `/usr/share/SuperCollider-3.13.0/HelpSource` or `/opt/SuperCollider/HelpSource` |
-  | Windows  | `C:\Program Files\SuperCollider-3.13.0\HelpSource` |
-
-  The unversioned auto-detected defaults (`/Applications/SuperCollider.app/...`, etc.) only work if that exact path exists — a symlink or alias pointing there is fine too.
+  | Platform | Example `SC_HELP_DIR` value |
+  |----------|-----------------------------|
+  | macOS    | `/Applications/SuperCollider-3.14.1.app/Contents/Resources/HelpSource` |
+  | Linux    | `/usr/share/SuperCollider-3.14.1/HelpSource` or `/opt/SuperCollider/HelpSource` |
+  | Windows  | Not needed if `~/.supercollider.yaml` is configured |
 
 **Example configuration**:
 ```bash
-# Linux/macOS
-export SCLANG_PATH=/usr/local/bin/sclang
-export SCSYNTH_PATH=/usr/local/bin/scsynth
-export SC_HELP_DIR="/Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource"
+# Linux — SC_HELP_DIR needed because sclang path doesn't imply HelpSource location
+export SC_HELP_DIR="/usr/share/SuperCollider-3.14.1/HelpSource"
 
-# Windows (PowerShell)
-$env:SCLANG_PATH="C:\Program Files\SuperCollider-3.13.0\sclang.exe"
-$env:SCSYNTH_PATH="C:\Program Files\SuperCollider-3.13.0\scsynth.exe"
-$env:SC_HELP_DIR="C:\Program Files\SuperCollider-3.13.0\HelpSource"
+# macOS/Windows — prefer ~/.supercollider.yaml; SC_HELP_DIR only needed as override
+export SC_HELP_DIR="/Applications/SuperCollider-3.14.1.app/Contents/Resources/HelpSource"
 ```
 
 **Note**: Environment variables take precedence over `.supercollider.yaml` settings. For most users, `.supercollider.yaml` is the recommended approach.
