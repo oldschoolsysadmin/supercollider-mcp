@@ -166,17 +166,22 @@ function collectSchelpFiles(dir: string): string[] {
 }
 
 /**
- * Extract TITLE, SUMMARY, and CATEGORIES from the top of a .schelp file
+ * Extract title, summary, and categories from the top of a .schelp file
  * without parsing the whole document. Used for building the search index.
+ *
+ * The actual .schelp format uses lowercase keywords with a space before the
+ * value: `class:: SinOsc`, `summary:: ...`, `categories:: ...`.
+ * Class files use `class::` as the title field; standalone docs use `title::`.
+ * All matches are case-insensitive to handle mixed-case variants.
  */
 function extractMetadata(content: string): {
   title: string;
   summary: string;
   categories: string[];
 } {
-  const titleMatch = content.match(/^TITLE::(.+)$/m);
-  const summaryMatch = content.match(/^SUMMARY::(.+)$/m);
-  const categoriesMatch = content.match(/^CATEGORIES::(.+)$/m);
+  const titleMatch = content.match(/^(?:class|title)::\s*(.+)$/im);
+  const summaryMatch = content.match(/^summary::\s*(.+)$/im);
+  const categoriesMatch = content.match(/^categories::\s*(.+)$/im);
 
   return {
     title: titleMatch ? titleMatch[1].trim() : "",
@@ -274,10 +279,11 @@ export function findHelpFile(className: string): string | null {
 /**
  * Parse a full .schelp document into a structured HelpDocument.
  *
- * The .schelp format is line-oriented. Sections begin with an uppercase
- * keyword followed by `::`. Inside METHOD:: blocks, `argument::` lines
- * introduce argument descriptions. CODE:: blocks run until a line that
- * is exactly `::`.
+ * The .schelp format is line-oriented. Section headers are lowercase keywords
+ * followed by `::` with no value on the same line (e.g. `description::`).
+ * Method definitions use `method:: name`. Argument lines use `argument:: name`.
+ * Code blocks open with `code::` and close with a bare `::` on its own line.
+ * All keyword matching is case-insensitive to handle real-world variation.
  */
 export function parseSchelpFile(filePath: string): HelpDocument {
   const content = fs.readFileSync(filePath, "utf-8");
@@ -325,31 +331,33 @@ export function parseSchelpFile(filePath: string): HelpDocument {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Detect section transitions
-    if (trimmed === "DESCRIPTION::") {
+    const tl = trimmed.toLowerCase();
+
+    // Detect section transitions (case-insensitive, no value on the same line)
+    if (tl === "description::") {
       section = "description";
       continue;
     }
-    if (trimmed === "CLASSMETHODS::") {
+    if (tl === "classmethods::") {
       flushMethod();
       section = "classmethods";
       currentMethodSection = "classmethods";
       continue;
     }
-    if (trimmed === "INSTANCEMETHODS::") {
+    if (tl === "instancemethods::") {
       flushMethod();
       section = "instancemethods";
       currentMethodSection = "instancemethods";
       continue;
     }
-    if (trimmed === "EXAMPLES::") {
+    if (tl === "examples::") {
       flushMethod();
       section = "examples";
       continue;
     }
 
-    // CODE:: block — collect until bare ::
-    if (trimmed === "CODE::") {
+    // code:: block — collect until bare ::
+    if (tl === "code::") {
       prevSection = section;
       section = "code";
       continue;
@@ -374,15 +382,15 @@ export function parseSchelpFile(filePath: string): HelpDocument {
       continue;
     }
 
-    // Preamble metadata lines
+    // Preamble metadata lines — case-insensitive, value follows `:: `
     if (section === "preamble") {
-      const titleMatch = trimmed.match(/^TITLE::(.+)$/);
+      const titleMatch = trimmed.match(/^(?:class|title)::\s*(.+)$/i);
       if (titleMatch) { doc.name = titleMatch[1].trim(); continue; }
 
-      const summaryMatch = trimmed.match(/^SUMMARY::(.+)$/);
+      const summaryMatch = trimmed.match(/^summary::\s*(.+)$/i);
       if (summaryMatch) { doc.summary = summaryMatch[1].trim(); continue; }
 
-      const catMatch = trimmed.match(/^CATEGORIES::(.+)$/);
+      const catMatch = trimmed.match(/^categories::\s*(.+)$/i);
       if (catMatch) {
         doc.categories = catMatch[1].split(",").map((c) => c.trim());
         continue;
@@ -390,20 +398,20 @@ export function parseSchelpFile(filePath: string): HelpDocument {
       continue;
     }
 
-    // METHOD:: lines inside a methods section
+    // method:: lines inside a methods section
     if (
       (section === "classmethods" || section === "instancemethods") &&
-      trimmed.startsWith("METHOD::")
+      tl.startsWith("method::")
     ) {
       flushMethod();
-      const methodName = trimmed.replace("METHOD::", "").trim();
+      const methodName = trimmed.replace(/^method::\s*/i, "").trim();
       currentMethod = { name: methodName, arguments: [], description: "" };
       continue;
     }
 
     // argument:: lines inside a method
-    if (currentMethod && trimmed.startsWith("argument::")) {
-      const argName = trimmed.replace("argument::", "").trim();
+    if (currentMethod && tl.startsWith("argument::")) {
+      const argName = trimmed.replace(/^argument::\s*/i, "").trim();
       // The description follows on subsequent lines until the next keyword
       currentMethod.arguments.push({ name: argName, description: "" });
       continue;
