@@ -20,7 +20,6 @@ import {
   resolveHelpDir,
   helpDirExists,
 } from "../supercollider/helpSystem.js";
-import { SuperColliderError, SCLANG_NOT_CONNECTED } from "../utils/errors.js";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -199,11 +198,16 @@ export async function getClassInterfaceHandler(
   const { className } = args;
 
   if (!sclangClient.isConnected()) {
-    throw new SuperColliderError(
-      `sclang is not connected. Connect sclang before using get_class_interface, ` +
-      `or use get_sc_help for file-based docs (no interpreter required).`,
-      SCLANG_NOT_CONNECTED
-    );
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text:
+            `sclang is not connected — get_class_interface requires the language interpreter.\n` +
+            `Use get_sc_help for file-based docs (no interpreter required), or connect sclang first.`,
+        },
+      ],
+    };
   }
 
   // SC introspection code returned as a nested array:
