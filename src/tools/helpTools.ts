@@ -18,6 +18,7 @@ import {
   parseSchelpFile,
   renderHelpDocument,
   resolveHelpDir,
+  helpDirExists,
 } from "../supercollider/helpSystem.js";
 import { SuperColliderError, SCLANG_NOT_CONNECTED } from "../utils/errors.js";
 
@@ -54,6 +55,23 @@ export async function searchScHelpHandler(args: z.infer<typeof SearchScHelpSchem
   const { query, category, limit = 20 } = args;
   const helpDir = resolveHelpDir();
 
+  if (!helpDirExists()) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text:
+            `SuperCollider help directory not found: ${helpDir}\n` +
+            `SuperCollider may not be installed, or it may be in a version-numbered directory.\n` +
+            `Set SC_HELP_DIR to the HelpSource/ path inside your SC installation, e.g.:\n` +
+            `  macOS:   /Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource\n` +
+            `  Linux:   /usr/share/SuperCollider-3.13.0/HelpSource\n` +
+            `  Windows: C:\\Program Files\\SuperCollider-3.13.0\\HelpSource`,
+        },
+      ],
+    };
+  }
+
   const results = searchHelp(query, category, limit);
 
   if (results.length === 0) {
@@ -61,9 +79,9 @@ export async function searchScHelpHandler(args: z.infer<typeof SearchScHelpSchem
       content: [
         {
           type: "text" as const,
-          text: `No help documents found for "${query}"${category ? ` in category "${category}"` : ""}.\n` +
-                `Help directory: ${helpDir}\n` +
-                `Set SC_HELP_DIR if your SuperCollider is installed in a non-standard location.`,
+          text:
+            `No help documents found for "${query}"${category ? ` in category "${category}"` : ""}.\n` +
+            `Help directory searched: ${helpDir}`,
         },
       ],
     };
@@ -98,17 +116,35 @@ export async function searchScHelpHandler(args: z.infer<typeof SearchScHelpSchem
 export async function getScHelpHandler(args: z.infer<typeof GetScHelpSchema>) {
   const { className } = args;
 
-  const filePath = findHelpFile(className);
+  const helpDir = resolveHelpDir();
 
-  if (!filePath) {
-    const helpDir = resolveHelpDir();
+  if (!helpDirExists()) {
     return {
       content: [
         {
           type: "text" as const,
-          text: `No help file found for "${className}".\n` +
-                `Help directory searched: ${helpDir}\n` +
-                `Try search_sc_help to find the correct class name, or set SC_HELP_DIR.`,
+          text:
+            `SuperCollider help directory not found: ${helpDir}\n` +
+            `SuperCollider may not be installed, or it may be in a version-numbered directory.\n` +
+            `Set SC_HELP_DIR to the HelpSource/ path inside your SC installation, e.g.:\n` +
+            `  macOS:   /Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource\n` +
+            `  Linux:   /usr/share/SuperCollider-3.13.0/HelpSource\n` +
+            `  Windows: C:\\Program Files\\SuperCollider-3.13.0\\HelpSource`,
+        },
+      ],
+    };
+  }
+
+  const filePath = findHelpFile(className);
+
+  if (!filePath) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text:
+            `No help file found for "${className}" in ${helpDir}.\n` +
+            `Check the class name (SC is case-sensitive) or use search_sc_help to find it.`,
         },
       ],
     };

@@ -75,6 +75,14 @@ export function resolveHelpDir(): string {
 }
 
 /**
+ * Return true if the resolved help directory exists on disk.
+ * Used by tool handlers to distinguish "dir missing" from "no matches found".
+ */
+export function helpDirExists(): boolean {
+  return fs.existsSync(resolveHelpDir());
+}
+
+/**
  * Walk a directory tree and collect all .schelp file paths.
  * Returns an empty array if the help dir doesn't exist.
  */
