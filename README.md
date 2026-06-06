@@ -11,6 +11,7 @@ Model Context Protocol (MCP) server for SuperCollider integration with Claude Co
 - **Group Management**: Create and manage hierarchical node groups
 - **Buffer Management**: Load audio files, record from JACK inputs/microphone, and manage buffer lifecycle
 - **Pattern Support (JITlib)**: Create, modify, control, and query Pdef (event patterns) and Tdef (task patterns) via sclang interpreter
+- **Inline Help Docs**: Search and retrieve SC class documentation from local `.schelp` files without leaving the session; introspect live class interfaces via sclang
 - **Status Queries**: Real-time server status including CPU, synth count, sample rate, and UGen count
 - **Resource Allocation**: Automatic collision-free ID management for nodes, buffers, and buses
 
@@ -32,11 +33,18 @@ Add to your Claude Code MCP configuration (`~/.config/claude/mcp.json` or simila
   "mcpServers": {
     "supercollider": {
       "command": "node",
-      "args": ["/path/to/supercollider-mcp/dist/index.js"]
+      "args": ["/path/to/supercollider-mcp/dist/index.js"],
+      "env": {
+        "SCLANG_PATH": "/path/to/sclang",
+        "SCSYNTH_PATH": "/path/to/scsynth",
+        "SC_HELP_DIR": "/path/to/SuperCollider/HelpSource"
+      }
     }
   }
 }
 ```
+
+`SC_HELP_DIR` points to the `HelpSource/` directory inside your SuperCollider installation — needed for the `search_sc_help` and `get_sc_help` tools. SuperCollider often installs into a version-numbered directory (e.g. `SuperCollider-3.13.0`), so the auto-detected default may not match; set this explicitly if help queries return no results. See [SC_HELP_DIR](#sc_help_dir) below for platform examples.
 
 ### Programmatic Usage
 
@@ -59,7 +67,7 @@ await client.disconnect();
 
 ## MCP Tools
 
-This server provides 26 MCP tools organized into 7 categories:
+This server provides 29 MCP tools organized into 8 categories:
 
 ### Server Lifecycle
 
@@ -430,6 +438,58 @@ List all active patterns (Pdefs and Tdefs) currently defined in sclang.
 - JITlib must be loaded in sclang environment (verified automatically on connection)
 - `SCLANG_PATH` environment variable or `.supercollider.yaml` configuration required
 
+### Help Documentation
+
+Query SuperCollider's built-in help system inline while building patches, without leaving the session. The file-based tools (`search_sc_help`, `get_sc_help`) work by reading `.schelp` source files from your SC installation — no interpreter required. `get_class_interface` uses live sclang introspection and requires sclang to be connected.
+
+#### search_sc_help
+Search for SuperCollider classes or UGens by keyword.
+
+**Parameters**:
+- `query` (string, required): Keyword to search for (e.g. `"reverb"`, `"LFNoise"`, `"Pbind"`)
+- `category` (string, optional): Narrow by category (e.g. `"UGens"`, `"Patterns"`, `"Filters"`)
+- `limit` (number, optional): Maximum results (default: 20, max: 50)
+
+**Returns**: List of matching class names, summaries, and categories.
+
+**Example**: `{ "query": "allpass", "category": "UGens" }`
+
+**Note**: Does not require sclang to be running. Requires `SC_HELP_DIR` to point to your SC installation's `HelpSource/` directory.
+
+#### get_sc_help
+Retrieve full documentation for a specific SuperCollider class.
+
+**Parameters**:
+- `className` (string, required): Exact class name (case-sensitive, e.g. `"SinOsc"`, `"Pbind"`)
+
+**Returns**: Parsed help document including description, all methods with argument names and descriptions, and code examples.
+
+**Example**: `{ "className": "LFNoise1" }`
+
+**Note**: Does not require sclang to be running. Use `search_sc_help` first if you are unsure of the exact class name.
+
+#### get_class_interface
+Introspect a class's methods and argument signatures via the live sclang interpreter.
+
+**Parameters**:
+- `className` (string, required): Class name to introspect (e.g. `"SinOsc"`, `"Ndef"`)
+
+**Returns**: All class and instance methods with argument names and default values, plus the superclass chain.
+
+**Example**: `{ "className": "SinOsc" }`
+
+**Returns**:
+```
+# SinOsc (live introspection)
+*Inherits from: UGen > AbstractFunction > Object*
+
+## Class Methods
+### .ar(freq: 440, phase: 0, mul: 1, add: 0)
+### .kr(freq: 440, phase: 0, mul: 1, add: 0)
+```
+
+**Note**: Requires sclang to be connected. More authoritative than `get_sc_help` for quark-provided classes, as it reflects what is actually loaded in the running interpreter.
+
 ## Development
 
 ```bash
@@ -452,7 +512,9 @@ npm run dev
 - **Resource Allocators** (`src/supercollider/allocators.ts`): Collision-free ID management for nodes (1024), buffers (1024), audio buses (128), control buses (16384)
 - **sclang Integration** (`src/supercollider/quarks.ts`): Child process execution for quark management and SynthDef compilation
 - **Pattern Tools** (`src/tools/patternTools.ts`): MCP tool handlers for JITlib pattern operations with Zod validation
-- **MCP Server** (`src/index.ts`): stdio transport with 26 tool handlers organized by category
+- **Help System** (`src/supercollider/helpSystem.ts`): `.schelp` file discovery, keyword search, and a line-oriented parser that converts SC's structured plaintext format to readable output
+- **Help Tools** (`src/tools/helpTools.ts`): MCP tool handlers for `search_sc_help`, `get_sc_help`, and `get_class_interface`
+- **MCP Server** (`src/index.ts`): stdio transport with 29 tool handlers organized by category
 - **OSC Utilities** (`src/utils/osc.ts`): Type-safe OSC message builders for all server commands
 - **Error Handling** (`src/utils/errors.ts`): Custom error classes with error codes for robust error reporting
 
@@ -465,6 +527,7 @@ npm run dev
 5. **Group Management** (2 tools): Create, free hierarchical groups
 6. **Buffer Management** (4 tools): Load files, record audio, free buffers
 7. **Pattern Support** (6 tools): Create, modify, control, query Pdefs and Tdefs
+8. **Help Documentation** (3 tools): Search help index, retrieve class docs, introspect live class interfaces
 
 ### Resource Management
 
@@ -585,15 +648,32 @@ If you prefer environment variables or need to override `.supercollider.yaml` se
   - **When to set**: Auto-detection fails or specific version required
   - **Example**: `/usr/local/bin/scsynth` or `/opt/supercollider-3.13/bin/scsynth`
 
+- **`SC_HELP_DIR`**: <a name="sc_help_dir"></a>Path to the `HelpSource/` directory inside your SC installation
+  - **Default**: Platform-specific standard location (see below)
+  - **When to set**: SC is installed in a version-numbered directory (very common), or to a non-standard path
+  - **Used by**: `search_sc_help` and `get_sc_help` tools — these read `.schelp` source files directly
+
+  SuperCollider frequently installs into versioned directories. If help queries return no results, check the actual path and set `SC_HELP_DIR` accordingly:
+
+  | Platform | Common versioned path |
+  |----------|-----------------------|
+  | macOS    | `/Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource` |
+  | Linux    | `/usr/share/SuperCollider-3.13.0/HelpSource` or `/opt/SuperCollider/HelpSource` |
+  | Windows  | `C:\Program Files\SuperCollider-3.13.0\HelpSource` |
+
+  The unversioned auto-detected defaults (`/Applications/SuperCollider.app/...`, etc.) only work if that exact path exists — a symlink or alias pointing there is fine too.
+
 **Example configuration**:
 ```bash
 # Linux/macOS
 export SCLANG_PATH=/usr/local/bin/sclang
 export SCSYNTH_PATH=/usr/local/bin/scsynth
+export SC_HELP_DIR="/Applications/SuperCollider-3.13.0.app/Contents/Resources/HelpSource"
 
 # Windows (PowerShell)
-$env:SCLANG_PATH="C:\Program Files\SuperCollider\sclang.exe"
-$env:SCSYNTH_PATH="C:\Program Files\SuperCollider\scsynth.exe"
+$env:SCLANG_PATH="C:\Program Files\SuperCollider-3.13.0\sclang.exe"
+$env:SCSYNTH_PATH="C:\Program Files\SuperCollider-3.13.0\scsynth.exe"
+$env:SC_HELP_DIR="C:\Program Files\SuperCollider-3.13.0\HelpSource"
 ```
 
 **Note**: Environment variables take precedence over `.supercollider.yaml` settings. For most users, `.supercollider.yaml` is the recommended approach.
