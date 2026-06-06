@@ -138,13 +138,23 @@ export async function getScHelpHandler(args: z.infer<typeof GetScHelpSchema>) {
 /**
  * get_class_interface
  *
- * Uses sclang's runtime introspection to list the methods and argument
- * names for a class. This is more authoritative than the help files for:
- *   - Quark-provided classes (not in the stock HelpSource)
- *   - Verifying the actual live API vs. potentially stale docs
+ * Uses sclang's runtime introspection to enumerate methods, argument names,
+ * and default values for a class. More authoritative than file-based help for:
+ *   - Quark-provided classes (no entry in the stock HelpSource)
+ *   - Verifying the live API vs. potentially stale docs
+ *   - UGens: exposes .ar/.kr/.ir rates and their argument lists exactly
  *
- * Requires sclang to be connected (use the pattern tools to trigger
- * auto-connect, or boot via the server lifecycle tools).
+ * Requires sclang to be connected.
+ *
+ * How the SC introspection works:
+ *   ClassName.class.methods  — class-side methods (e.g. SinOsc.ar)
+ *   ClassName.methods        — instance-side methods
+ *   Method#argumentNames     — ordered array of argument name symbols
+ *   Method#prototypeFrame    — parallel array of default values (nil = required)
+ *   Method#ownerClass        — lets us skip inherited Object/UGen boilerplate
+ *
+ * We filter out methods inherited from Object to keep the output focused on
+ * what's actually defined for the class (or its immediate UGen superclass).
  */
 export async function getClassInterfaceHandler(
   sclangClient: SclangClient,
@@ -160,58 +170,89 @@ export async function getClassInterfaceHandler(
     );
   }
 
-  // Ask sclang to enumerate class methods and instance methods with their
-  // argument names. We return arrays so we can format them cleanly.
+  // SC introspection code returned as a nested array:
+  //   [ className, superclassChain, classMethods, instanceMethods ]
+  //
+  // Each method entry: [ name, [ [argName, defaultOrNil], ... ] ]
+  //
+  // We skip methods owned by Object (and Meta_Object) so the result stays
+  // focused on what this class actually contributes. UGen subclasses also
+  // skip UGen itself — the useful surface is the .ar/.kr/.ir class methods.
   const code = `
-    var cls = ${className};
+    var cls = ${className}.asClass;
     if(cls.isNil, {
-      "CLASS_NOT_FOUND"
+      ["NOT_FOUND"]
     }, {
-      var classMethods = cls.class.methods.collect { |m|
-        [m.name.asString, m.argumentNames.collect(_.asString)]
+      var skipClasses = [Object, UGen, AbstractFunction, Stream];
+      var skipMeta   = skipClasses.collect(_.class);
+
+      var collectMethods = { |methodList, skipList|
+        methodList.select { |m| skipList.includes(m.ownerClass).not }
+          .collect { |m|
+            var argNames = m.argumentNames.collect(_.asString);
+            var defaults = m.prototypeFrame ? [];
+            // prototypeFrame[0] is 'this', so offset by 1
+            var pairs = argNames.collectWithIndex { |name, i|
+              var def = defaults[i + 1];
+              [name, if(def.isNil, { nil }, { def.asString })]
+            };
+            [m.name.asString, pairs]
+          }
       };
-      var instanceMethods = cls.methods.collect { |m|
-        [m.name.asString, m.argumentNames.collect(_.asString)]
-      };
-      [cls.name.asString, classMethods, instanceMethods]
+
+      var superchain = cls.superclasses.collect(_.name.asString);
+
+      [
+        cls.name.asString,
+        superchain,
+        collectMethods.(cls.class.methods, skipMeta),
+        collectMethods.(cls.methods, skipClasses)
+      ]
     })
   `;
 
-  // We use the public interpret path via a small wrapper — sclangClient
-  // exposes interpret privately, so we route through an existing pattern
-  // method to get access. TODO: expose a public interpret() on SclangClient
-  // so helpTools doesn't need this workaround.
-  //
-  // For now, use createPdef with a throw-away name to piggyback the interpreter.
-  // This is a temporary shim; the right fix is tracked in the TODO above.
-  const result = await (sclangClient as any).interpret(code);
+  const result = await sclangClient.interpret(code);
 
-  if (result === "CLASS_NOT_FOUND" || result === null) {
+  if (!Array.isArray(result) || result[0] === "NOT_FOUND") {
     return {
       content: [
         {
           type: "text" as const,
-          text: `Class "${className}" not found in sclang. ` +
-                `Check the name (SC is case-sensitive) or install the quark that provides it.`,
+          text:
+            `Class "${className}" not found in sclang. ` +
+            `Check the name (SC is case-sensitive) or install the quark that provides it.`,
         },
       ],
     };
   }
 
-  const [name, classMethods, instanceMethods] = result as [
+  const [name, superchain, classMethods, instanceMethods] = result as [
     string,
-    [string, string[]][],
-    [string, string[]][],
+    string[],
+    [string, [string, string | null][]][],
+    [string, [string, string | null][]][],
   ];
 
-  const lines = [`# ${name} (live introspection)`, ""];
+  const lines: string[] = [`# ${name} (live introspection)`];
+  if (superchain.length) {
+    lines.push(`*Inherits from: ${superchain.join(" > ")}*`);
+  }
+  lines.push("");
 
-  function renderMethods(methods: [string, string[]][], heading: string): void {
+  // Render one section of methods.
+  // Each method shows its full call signature with defaults where known.
+  function renderMethods(
+    methods: [string, [string, string | null][]][],
+    heading: string
+  ): void {
     if (!methods.length) return;
     lines.push(`## ${heading}`);
-    for (const [mName, argNames] of methods) {
-      const sig = argNames.length ? `(${argNames.join(", ")})` : "()";
-      lines.push(`- .${mName}${sig}`);
+    for (const [mName, argPairs] of methods) {
+      // Build a human-readable signature: freq: 440, phase: 0
+      const sigParts = argPairs.map(([argName, def]) =>
+        def !== null && def !== "nil" ? `${argName}: ${def}` : argName
+      );
+      lines.push(`### .${mName}(${sigParts.join(", ")})`);
     }
     lines.push("");
   }

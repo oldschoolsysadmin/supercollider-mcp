@@ -184,7 +184,7 @@ export class SclangClient extends EventEmitter {
    * @param asString - Return result as string (for post window) instead of JSON
    * @returns Result from sclang
    */
-  private async interpret(code: string, asString: boolean = false): Promise<any> {
+  public async interpret(code: string, asString: boolean = false): Promise<any> {
     if (!this.isConnected()) {
       throw new SuperColliderError(
         'Cannot execute code: not connected to sclang',
