@@ -442,6 +442,8 @@ List all active patterns (Pdefs and Tdefs) currently defined in sclang.
 
 Query SuperCollider's built-in help system inline while building patches, without leaving the session. The file-based tools (`search_sc_help`, `get_sc_help`) work by reading `.schelp` source files from your SC installation — no interpreter required. `get_class_interface` uses live sclang introspection and requires sclang to be connected.
 
+For an AI working through this MCP, these tools act as the equivalent of tab-completion and hover documentation in an IDE: rather than hallucinating argument names or defaulting to the most common UGens it has seen in training data, the model can look up the exact call signature for any class — including quark-provided ones that may postdate its training cutoff — and ground its code generation in the actual installed API. The result is meaningfully more accurate patch construction, with far less back-and-forth correcting argument names or discovering that a UGen doesn't work the way the model assumed.
+
 #### search_sc_help
 Search for SuperCollider classes or UGens by keyword.
 
